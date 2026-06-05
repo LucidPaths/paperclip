@@ -7,7 +7,9 @@ import {
   costEvents,
   heartbeatRuns,
   issueComments,
+  issueLabels,
   issues,
+  labels,
   projects,
 } from "@paperclipai/db";
 import { logger } from "../middleware/logger.js";
@@ -25,7 +27,8 @@ export const DEFAULT_PRODUCTIVITY_REVIEW_NO_COMMENT_STREAK_RUNS = 10;
 export const DEFAULT_PRODUCTIVITY_REVIEW_LONG_ACTIVE_HOURS = 6;
 export const DEFAULT_PRODUCTIVITY_REVIEW_HIGH_CHURN_HOURLY = 10;
 export const DEFAULT_PRODUCTIVITY_REVIEW_HIGH_CHURN_SIX_HOURS = 30;
-export const DEFAULT_PRODUCTIVITY_REVIEW_RESOLVED_SNOOZE_MS = 6 * 60 * 60 * 1000;
+export const DEFAULT_PRODUCTIVITY_REVIEW_RESOLVED_SNOOZE_MS = 24 * 60 * 60 * 1000;
+export const PRODUCTIVITY_REVIEW_EXEMPTION_LABEL = "no-productivity-review";
 export const DEFAULT_PRODUCTIVITY_REVIEW_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
 export const DEFAULT_PRODUCTIVITY_REVIEW_MAX_REFRESH_COMMENTS = 3;
 export const DEFAULT_PRODUCTIVITY_REVIEW_CREATION_WINDOW_MS = 24 * 60 * 60 * 1000;
@@ -281,6 +284,22 @@ export function productivityReviewService(db: Db, deps?: { enqueueWakeup?: Enque
       .orderBy(desc(issues.updatedAt))
       .limit(1)
       .then((rows) => rows[0] ?? null);
+  }
+
+  async function hasProductivityReviewExemptionLabel(companyId: string, issueId: string): Promise<boolean> {
+    const rows = await db
+      .select({ name: labels.name })
+      .from(issueLabels)
+      .innerJoin(labels, eq(issueLabels.labelId, labels.id))
+      .where(
+        and(
+          eq(issueLabels.companyId, companyId),
+          eq(issueLabels.issueId, issueId),
+          eq(labels.name, PRODUCTIVITY_REVIEW_EXEMPTION_LABEL),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
   }
 
   async function countRecentProductivityReviews(
@@ -788,6 +807,7 @@ export function productivityReviewService(db: Db, deps?: { enqueueWakeup?: Enque
       existing: 0,
       snoozed: 0,
       creationCapped: 0,
+      exempted: 0,
       skipped: 0,
       failed: 0,
       reviewIssueIds: [] as string[],
@@ -802,6 +822,10 @@ export function productivityReviewService(db: Db, deps?: { enqueueWakeup?: Enque
       }
       if (await isProductivityReviewDescendant(candidate)) {
         result.skipped += 1;
+        continue;
+      }
+      if (await hasProductivityReviewExemptionLabel(candidate.companyId, candidate.id)) {
+        result.exempted += 1;
         continue;
       }
       if (await findRecentResolvedProductivityReview(candidate.companyId, candidate.id, thresholds, now)) {
