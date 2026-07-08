@@ -3,9 +3,17 @@ FROM node:lts-trixie-slim AS base
 ARG USER_UID=1000
 ARG USER_GID=1000
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ca-certificates gosu curl gh git wget ripgrep python3 \
+  && apt-get install -y --no-install-recommends \
+     ca-certificates gosu curl gh git wget ripgrep python3 \
+     openssh-client jq zip unzip make sqlite3 rsync tree less vim \
+     python3-pip python3-venv gnupg httpie yq postgresql-client dnsutils iproute2 procps \
   && rm -rf /var/lib/apt/lists/* \
   && corepack enable
+
+# OPTERIA: kubectl + helm for IaC / external cluster management
+RUN curl -fsSL "https://dl.k8s.io/release/$(curl -fsSL https://dl.k8s.io/release/stable.txt)/bin/linux/$(dpkg --print-architecture)/kubectl" -o /usr/local/bin/kubectl \
+  && chmod +x /usr/local/bin/kubectl \
+  && curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Modify the existing node user/group to have the specified UID/GID to match host user
 RUN usermod -u $USER_UID --non-unique node \
@@ -60,12 +68,49 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 WORKDIR /app
 COPY --chown=node:node --from=build /app /app
-RUN npm install --global --omit=dev @anthropic-ai/claude-code@latest @openai/codex@latest opencode-ai @google/gemini-cli@latest \
-  && apt-get update \
-  && apt-get install -y --no-install-recommends openssh-client jq \
-  && rm -rf /var/lib/apt/lists/* \
+# OPTERIA: pinned agent CLIs + memory/m365 tooling (reproducible, matches running image; no gemini)
+RUN npm install --global --omit=dev @anthropic-ai/claude-code@2.1.175 @openai/codex@0.118.0 opencode-ai@1.17.4 @tobilu/qmd@2.0.1 @pnp/cli-microsoft365@11.8.0 \
   && mkdir -p /paperclip \
   && chown node:node /paperclip
+
+# OPTERIA: Playwright + Chromium for the screenshot skill
+RUN python3 -m venv /opt/screenshot-venv \
+  && /opt/screenshot-venv/bin/pip install --no-cache-dir playwright pypdf pypdfium2 pillow segno \
+  && /opt/screenshot-venv/bin/python3 -m playwright install --with-deps chromium \
+  && chown -R node:node /opt/screenshot-venv
+
+# OPTERIA: get-shit-done (GSD) workflow skills -> /opt/gsd-* (init container syncs to agent HOME)
+ENV GSD_HOME=/opt/gsd-stage
+RUN mkdir -p $GSD_HOME/.claude $GSD_HOME/.codex \
+  && HOME=$GSD_HOME npx --yes get-shit-done-cc@latest --claude --global \
+  && HOME=$GSD_HOME npx --yes get-shit-done-cc@latest --codex --global \
+  && mv $GSD_HOME/.claude /opt/gsd-claude \
+  && mv $GSD_HOME/.codex /opt/gsd-codex \
+  && rm -rf $GSD_HOME \
+  && echo '{}' > /opt/gsd-claude/settings.json \
+  && chown -R node:node /opt/gsd-claude /opt/gsd-codex
+ENV GSD_HOME=
+
+# OPTERIA: staged skill commands (agent-skills/ = operative/skills/ from ops-stack, staged at build time)
+COPY --chown=node:node agent-skills/claude-commands/ /opt/agent-skills/claude-commands/
+COPY --chown=node:node agent-skills/codex-skills/ /opt/agent-skills/codex-skills/
+
+# OPTERIA: trust mounted workspace git dirs
+RUN git config --system --add safe.directory /data/workspace/ops-stack \
+  && git config --system --add safe.directory /data/workspace/vault \
+  && git config --system --add safe.directory /data/workspace/website \
+  && git config --system --add safe.directory /data/workspace/factory \
+  && git config --system --add safe.directory /data/workspace/tools \
+  && git config --system --add safe.directory /data/workspace/slides \
+  && git config --system --add safe.directory /data/workspace/opteria \
+  && git config --system --add safe.directory /data/workspace/hackation/website \
+  && git config --system --add safe.directory /data/workspace/hackation/products \
+  && git config --system --add safe.directory /data/workspace/hackation/slides \
+  && git config --system --add safe.directory /data/workspace/opteria/website \
+  && git config --system --add safe.directory /data/workspace/opteria/clients \
+  && git config --system --add safe.directory /data/workspace/opteria/core \
+  && git config --system --add safe.directory /data/workspace/zerohunger \
+  && git config --system --add safe.directory /data/workspace/impactprotocol-core-edit
 
 COPY scripts/docker-entrypoint.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
