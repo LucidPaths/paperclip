@@ -21,6 +21,9 @@ import { unprocessable } from "../errors.js";
  * Scope note: this is an HTTP-layer gate — all agent/API writes pass through it;
  * engine-internal writes that do not traverse these routes are covered by the
  * contract + steward layers (identity law 01 §3.2–3.3), not by this middleware.
+ * Precision: this guard verifies the project exists IN PAPERCLIP; the
+ * project-to-registry (Project_Code) link is audited by the daily identity
+ * steward — a deliberate defense-in-depth split, not a gap.
  *
  * Semantics are pinned by the colocated vitest suite
  * (require-resolvable-project.test.ts), ported 1:1 from a 19-assertion harness.
@@ -40,22 +43,26 @@ export interface RequireResolvableProjectDeps {
 }
 
 const PROJECT_REQUIRED_MESSAGE =
-  "This issue has no project. Every issue must belong to a Paperclip project that "
-  + "carries a Project_Code in the NocoDB registry. Resolve the Project_Code from the "
-  + "registry and set projectId before creating or reparenting. Do not create orphan "
-  + "work (identity law 01 §3).";
+  "This issue has no project. Every issue must belong to an existing Paperclip "
+  + "project — and every client project carries a Project_Code in the NocoDB "
+  + "registry (the daily identity steward audits that link). Resolve the "
+  + "Project_Code from the registry and set projectId before creating or "
+  + "reparenting. Do not create orphan work (identity law 01 §3).";
 
 const DECOMPOSE_PROJECT_REQUIRED_MESSAGE =
-  "Decomposition children at those indexes resolve to no project (no child projectId "
-  + "and the source issue has none). Every issue must belong to a Paperclip project "
-  + "that carries a Project_Code in the NocoDB registry. Do not create orphan work "
-  + "(identity law 01 §3).";
+  "Decomposition children at those indexes resolve to no project (no child "
+  + "projectId and the source issue has none). Every issue must belong to an "
+  + "existing Paperclip project — and every client project carries a "
+  + "Project_Code in the NocoDB registry (the daily identity steward audits "
+  + "that link). Do not create orphan work (identity law 01 §3).";
 
 function projectUnresolvableMessage(projectId: string): string {
   return (
-    `projectId "${projectId}" does not resolve to a known project. Use a project `
-    + "registered in the NocoDB identity registry (Project_Code), or register it first. "
-    + "Never invent a project (identity law 01 §3)."
+    `projectId "${projectId}" does not resolve to an existing Paperclip `
+    + "project. Use a project registered in the NocoDB identity registry "
+    + "(Project_Code) — or run the new-engagement onboarding (ops-stack "
+    + "docs/pm-agent/09-onboarding.md) if this is genuinely new work. Never "
+    + "invent a project (identity law 01 §3)."
   );
 }
 
