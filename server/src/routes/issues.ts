@@ -120,6 +120,7 @@ import {
 } from "../services/task-watchdog-scope.js";
 import type { TaskWatchdogServiceDeps, taskWatchdogService } from "../services/task-watchdogs.js";
 import { logger } from "../middleware/logger.js";
+import { createRequireResolvableProject } from "../middleware/require-resolvable-project.js";
 import { conflict, forbidden, HttpError, notFound, unauthorized, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, getActorInfo } from "./authz.js";
 import {
@@ -2045,6 +2046,7 @@ export function issueRoutes(
   const instanceSettings = instanceSettingsService(db);
   const agentsSvc = agentService(db);
   const projectsSvc = projectService(db);
+  const requireProject = createRequireResolvableProject({ issuesSvc: svc, projectsSvc });
   const goalsSvc = goalService(db);
   const issueApprovalsSvc = issueApprovalService(db);
   const recoveryActionsSvc = issueRecoveryActionService(db);
@@ -6256,7 +6258,7 @@ export function issueRoutes(
     res.json({ ok: true });
   });
 
-  router.post("/companies/:companyId/issues", applyCreateIssueStatusDefault, validate(createIssueSchema), async (req, res) => {
+  router.post("/companies/:companyId/issues", applyCreateIssueStatusDefault, validate(createIssueSchema), requireProject("create"), async (req, res) => {
     const companyId = req.params.companyId as string;
     assertCompanyAccess(req, companyId);
     if (await assertLowTrustControlPlaneDenied(req, res, companyId, null)) return;
@@ -6482,7 +6484,7 @@ export function issueRoutes(
     });
   });
 
-  router.post("/issues/:id/children", applyCreateIssueStatusDefault, validate(createChildIssueSchema), async (req, res) => {
+  router.post("/issues/:id/children", applyCreateIssueStatusDefault, validate(createChildIssueSchema), requireProject("child"), async (req, res) => {
     const parentId = req.params.id as string;
     const parent = await svc.getById(parentId);
     if (!parent) {
@@ -6663,7 +6665,7 @@ export function issueRoutes(
     res.json(decompositions);
   });
 
-  router.post("/issues/:id/accepted-plan-decompositions", validate(createAcceptedPlanDecompositionSchema), async (req, res) => {
+  router.post("/issues/:id/accepted-plan-decompositions", validate(createAcceptedPlanDecompositionSchema), requireProject("decompose"), async (req, res) => {
     const sourceIssueId = req.params.id as string;
     const sourceIssue = await svc.getById(sourceIssueId);
     if (!sourceIssue) {
@@ -6923,7 +6925,7 @@ export function issueRoutes(
     res.json(result);
   });
 
-  router.patch("/issues/:id", validate(updateIssueRouteSchema), async (req, res) => {
+  router.patch("/issues/:id", validate(updateIssueRouteSchema), requireProject("patch"), async (req, res) => {
     const id = req.params.id as string;
     const existing = await svc.getById(id);
     if (!existing) {
